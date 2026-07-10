@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backrooms — 后室</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Courier New',monospace;color:#fff;user-select:none}
+canvas{display:block;width:100vw;height:100vh}
+
+/* Intro overlay */
+#intro{
+  position:fixed;inset:0;z-index:100;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:#000;cursor:pointer;
+  transition:opacity 1.5s ease;
+}
+#intro.hidden{opacity:0;pointer-events:none}
+#intro h1{
+  font-size:clamp(2rem,6vw,5rem);font-weight:100;letter-spacing:.5em;
+  color:#c8a951;text-shadow:0 0 60px rgba(200,169,81,.3);
+  margin-bottom:.5em;
+}
+#intro .sub{
+  font-size:clamp(.8rem,1.5vw,1.2rem);color:#888;letter-spacing:.3em;
+  margin-bottom:2em;
+}
+#intro .prompt{
+  font-size:.9rem;color:#666;letter-spacing:.15em;
+  animation:pulse 2s ease-in-out infinite;
+}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* HUD */
+#hud{
+  position:fixed;inset:0;z-index:10;pointer-events:none;
+  opacity:0;transition:opacity .5s ease;
+}
+#hud.visible{opacity:1}
+
+#crosshair{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:20px;height:20px;
+}
+#crosshair::before,#crosshair::after{
+  content:'';position:absolute;background:rgba(255,255,255,.6);
+}
+#crosshair::before{width:1px;height:100%;left:50%;transform:translateX(-50%)}
+#crosshair::after{width:100%;height:1px;top:50%;transform:translateY(-50%)}
+
+#info{
+  position:absolute;bottom:40px;left:50%;transform:translateX(-50%);
+  text-align:center;font-size:.75rem;color:rgba(255,255,255,.4);
+  letter-spacing:.1em;line-height:1.8;
+}
+
+#level-indicator{
+  position:absolute;top:30px;left:50%;transform:translateX(-50%);
+  font-size:.85rem;color:rgba(200,169,81,.6);letter-spacing:.3em;
+  text-align:center;
+}
+
+#sanity-bar{
+  position:absolute;bottom:80px;left:50%;transform:translateX(-50%);
+  width:200px;height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;
+}
+#sanity-fill{
+  height:100%;width:100%;border-radius:2px;
+  background:linear-gradient(90deg,#c8a951,#4a6fa5);
+  transition:width .5s ease;
+}
+
+#flashlight-indicator{
+  position:absolute;bottom:80px;right:40px;
+  font-size:.7rem;color:rgba(255,255,255,.3);letter-spacing:.1em;
+}
+
+/* Damage vignette */
+#vignette{
+  position:fixed;inset:0;z-index:9;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 60%,rgba(139,0,0,.4));
+  opacity:0;transition:opacity .3s ease;
+}
+
+/* Scanlines CRT effect */
+#scanlines{
+  position:fixed;inset:0;z-index:8;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.08) 2px,rgba(0,0,0,.08) 4px);
+}
+
+/* Entity alert */
+#alert{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;pointer-events:none;
+  font-size:2rem;color:rgba(255,50,50,.7);letter-spacing:.2em;
+  opacity:0;transition:opacity .3s ease;
+  text-shadow:0 0 40px rgba(255,0,0,.3);
+}
+
+/* Death screen */
+#death{
+  position:fixed;inset:0;z-index:50;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:#000;opacity:0;pointer-events:none;transition:opacity 2s ease;
+}
+#death.visible{opacity:1;pointer-events:auto}
+#death h1{font-size:2rem;font-weight:100;letter-spacing:.3em;color:#600;margin-bottom:1em}
+
+#debug{
+  position:fixed;bottom:8px;right:8px;z-index:12;pointer-events:none;
+  font-size:.6rem;color:rgba(255,255,255,.4);letter-spacing:.05em;
+  font-family:monospace;line-height:1.4;text-align:right;
+}
+#death p{font-size:.8rem;color:#666;letter-spacing:.15em;cursor:pointer}
+#death p:hover{color:#999}
+
+/* Loading */
+#loading{
+  position:fixed;inset:0;z-index:99;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:#0a0a0a;color:#666;font-size:.8rem;letter-spacing:.15em;
+  transition:opacity .8s ease;
+}
+#loading.hidden{opacity:0;pointer-events:none}
+#loading .spinner{
+  width:30px;height:30px;border:2px solid rgba(200,169,81,.15);
+  border-top-color:#c8a951;border-radius:50%;
+  animation:spin 1s linear infinite;margin-bottom:1.5em;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div>加载中...</div>
+</div>
+
+<!-- Error display -->
+<div id="load-error" style="display:none;position:fixed;inset:0;z-index:200;background:#0a0a0a;color:#cc6;flex-direction:column;align-items:center;justify-content:center;padding:2em;text-align:center;font-family:'Courier New',monospace;">
+  <h2 style="font-weight:100;letter-spacing:.3em;margin-bottom:1em;color:#c44;">加载失败</h2>
+  <p id="error-msg" style="color:#888;font-size:.8rem;max-width:500px;line-height:1.8;"></p>
+  <p style="color:#555;font-size:.7rem;margin-top:2em;">请检查网络连接后刷新页面</p>
+</div>
+
+<!-- Intro -->
+<div id="intro">
+  <h1>BACKROOMS</h1>
+  <div class="sub">— 后 室 —</div>
+  <div class="prompt">[ 点击屏幕进入 ]</div>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="level-indicator">Level 0 — 大堂</div>
+  <div id="sanity-bar"><div id="sanity-fill"></div></div>
+  <div id="info">WASD 移动 · 鼠标环顾 · Shift 奔跑</div>
+</div>
+
+<div id="vignette"></div>
+<div id="scanlines"></div>
+<div id="alert"></div>
+<div id="debug">DEBUG</div>
+
+<div id="death">
+  <h1>你迷失了...</h1>
+  <p onclick="location.reload()">[ 重 新 开 始 ]</p>
+</div>
+
+<!-- Three.js (UMD/CDN — no importmap needed) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"
+        integrity="sha384-LTJYdm72qrDeAPFxA/Lfb4ahM8zwiJBErxAUYXzmA60gmBPjN8+1hLAmrAf05TCw"
+        crossorigin="anonymous"></script>
+
+<script>
+// ─── ERROR HANDLING ──────────────────────────────────────
+(function() {
+  const errDiv = document.getElementById('load-error');
+  const errMsg = document.getElementById('error-msg');
+  window.__gameError = function(msg) {
+    document.getElementById('loading').style.display = 'none';
+    if (errDiv && errMsg) {
+      errMsg.textContent = msg;
+      errDiv.style.display = 'flex';
+    } else {
+      var d = document.createElement('div');
+      d.style.cssText = 'color:#c44;padding:2em;font-family:monospace';
+      d.textContent = msg;
+      document.body.appendChild(d);
+    }
+  };
+  // Check WebGL
+  try {
+    const c = document.createElement('canvas');
+    if (!c.getContext('webgl') && !c.getContext('webgl2'))
+      throw new Error('浏览器不支持 WebGL');
+  } catch(e) {
+    window.__gameError('WebGL 不可用：' + e.message);
+        throw e;
+      }
+    })();
+    </script>
+
+    <!-- Click handler registered before game init — works even if game init fails -->
+    <script>
+    (function(){
+      var el = document.getElementById('intro');
+      if (!el) return;
+      var prompt = el.querySelector('.prompt');
+      el.addEventListener('click', function(){
+        if (window.__gameReady && window.__startGame) {
+          window.__startGame();
+        } else if (prompt) {
+          prompt.textContent = '[ 加载中... 检查网络/CDN ]';
+          prompt.style.color = '#c44';
+        }
+      });
+    })();
+    </script>
+
+    <script>
+(function(){ try {
+  // Guard: THREE must be defined (CDN loaded)
+  if (typeof THREE === 'undefined') {
+    throw new Error('Three.js 库未加载。CDN 可能被防火墙/代理屏蔽，请检查网络或使用代理。');
+  }
+// ─── CONFIG ──────────────────────────────────────────────
+const TILE = 5;
+const WALL_H = 3.5;
+const GRID_W = 48;
+const GRID_H = 48;
+const PLAYER_H = 1.6;
+const VIEW_RANGE = 40;
+
+const T = { VOID:0, FLOOR:1, CORRIDOR:2, WALL:3 };
+
+// ─── STATE ───────────────────────────────────────────────
+const state = {
+  health: 100,
+  sanity: 100,
+  flashlight: 100,
+  level: 0,
+  levelNames: ['Level 0 — 大堂', 'Level 1 — 仓库', 'Level 2 — 管道'],
+  running: false,
+  dead: false,
+  entityNearby: false,
+  entityAlertTimer: 0,
+  footstepTimer: 0,
+  flickerTime: 0,
+  lights: [],
+  entities: [],
+  soundInitialized: false,
+};
+
+// ─── DOM REFS ────────────────────────────────────────────
+const hud = document.getElementById('hud');
+const introEl = document.getElementById('intro');
+const loadingEl = document.getElementById('loading');
+const levelInd = document.getElementById('level-indicator');
+const sanityFill = document.getElementById('sanity-fill');
+const vigEl = document.getElementById('vignette');
+const alertEl = document.getElementById('alert');
+const deathEl = document.getElementById('death');
+
+// ─── MAP GENERATOR ───────────────────────────────────────
+function generateMap(w, h, numRooms) {
+  const map = Array.from({length:h}, () => Array(w).fill(T.WALL));
+
+  const rooms = [];
+  const roomAttempts = numRooms * 3;
+  for (let i = 0; i < roomAttempts && rooms.length < numRooms; i++) {
+    const rw = 3 + Math.floor(Math.random() * 5);
+    const rh = 3 + Math.floor(Math.random() * 4);
+    const rx = 1 + Math.floor(Math.random() * (w - rw - 2));
+    const ry = 1 + Math.floor(Math.random() * (h - rh - 2));
+    // Check overlap
+    let ok = true;
+    for (const r of rooms) {
+      if (rx < r.x + r.w + 2 && rx + rw + 2 > r.x &&
+          ry < r.y + r.h + 2 && ry + rh + 2 > r.y) { ok = false; break; }
+    }
+    if (!ok) continue;
+    rooms.push({x:rx, y:ry, w:rw, h:rh, cx:Math.floor(rx+rw/2), cy:Math.floor(ry+rh/2)});
+    for (let dy = 0; dy < rh; dy++)
+      for (let dx = 0; dx < rw; dx++)
+        if (ry+dy < h && rx+dx < w) map[ry+dy][rx+dx] = T.FLOOR;
+  }
+
+  // Connect rooms (spanning tree)
+  const connected = new Set([0]);
+  while (connected.size < rooms.length) {
+    let bestDist = Infinity, bestRi = -1, bestRj = -1, bestPath = null;
+    for (const ri of connected) {
+      for (let rj = 0; rj < rooms.length; rj++) {
+        if (connected.has(rj)) continue;
+        const a = rooms[ri], b = rooms[rj];
+        const dx = b.cx - a.cx, dy = b.cy - a.cy;
+        const d = Math.abs(dx) + Math.abs(dy);
+        if (d < bestDist) {
+          bestDist = d;
+          bestRi = ri; bestRj = rj;
+          bestPath = {ax:a.cx, ay:a.cy, bx:b.cx, by:b.cy};
+        }
+      }
+    }
+    if (!bestPath) break;
+    connected.add(bestRj);
+    // Carve L-shaped corridor
+    const {ax, ay, bx, by} = bestPath;
+    for (let x = Math.min(ax,bx); x <= Math.max(ax,bx); x++) {
+      if (ay < h && x < w) map[ay][x] = T.CORRIDOR;
+      if (ay+1 < h && x < w && Math.random()<0.3) map[ay+1][x] = T.CORRIDOR;
+    }
+    for (let y = Math.min(ay,by); y <= Math.max(ay,by); y++) {
+      if (y < h && bx < w) map[y][bx] = T.CORRIDOR;
+      if (y < h && bx+1 < w && Math.random()<0.3) map[y][bx+1] = T.CORRIDOR;
+    }
+  }
+
+  // Extra random corridors for loops (30% chance)
+  for (let i = 0; i < rooms.length; i++) {
+    for (let j = i+1; j < rooms.length; j++) {
+      if (Math.random() > 0.3) continue;
+      const a = rooms[i], b = rooms[j];
+      if (Math.random() > 0.5) {
+        for (let x = Math.min(a.cx,b.cx); x <= Math.max(a.cx,b.cx); x++)
+          if (a.cy < h && x < w) map[a.cy][x] = T.CORRIDOR;
+        for (let y = Math.min(a.cy,b.cy); y <= Math.max(a.cy,b.cy); y++)
+          if (y < h && b.cx < w) map[y][b.cx] = T.CORRIDOR;
+      } else {
+        for (let y = Math.min(a.cy,b.cy); y <= Math.max(a.cy,b.cy); y++)
+          if (y < h && a.cx < w) map[y][a.cx] = T.CORRIDOR;
+        for (let x = Math.min(a.cx,b.cx); x <= Math.max(a.cx,b.cx); x++)
+          if (b.cy < h && x < w) map[b.cy][x] = T.CORRIDOR;
+      }
+    }
+  }
+
+  return {map, rooms};
+}
+
+// ─── TEXTURE GENERATORS ──────────────────────────────────
+function genWallTex() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const ctx = c.getContext('2d');
+  // Base yellowed wallpaper
+  ctx.fillStyle = '#c8b07a';
+  ctx.fillRect(0,0,256,256);
+  // Subtle pattern
+  ctx.strokeStyle = 'rgba(180,150,100,0.2)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < 256; x += 32) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,256); ctx.stroke();
+  }
+  for (let y = 0; y < 256; y += 32) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(256,y); ctx.stroke();
+  }
+  // Stains
+  for (let i = 0; i < 12; i++) {
+    const sx = Math.random()*256, sy = Math.random()*256;
+    const r = 10 + Math.random()*30;
+    const grad = ctx.createRadialGradient(sx,sy,0,sx,sy,r);
+    grad.addColorStop(0,`rgba(140,120,80,${0.08+Math.random()*0.12})`);
+    grad.addColorStop(1,'rgba(140,120,80,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(sx-r,sy-r,r*2,r*2);
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+function genFloorTex() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+  // Industrial carpet
+  ctx.fillStyle = '#7a6b5a';
+  ctx.fillRect(0,0,128,128);
+  // Carpet texture noise
+  for (let i = 0; i < 8000; i++) {
+    const x = Math.random()*128, y = Math.random()*128;
+    const v = 60 + Math.random()*40;
+    ctx.fillStyle = `rgba(${v+20},${v},${v-20},0.3)`;
+    ctx.fillRect(x,y,1,1);
+  }
+  // Grid lines
+  ctx.strokeStyle = 'rgba(60,50,40,0.1)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 128; i += 64) {
+    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,128); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(128,i); ctx.stroke();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+function genCeilTex() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#d4d0c8';
+  ctx.fillRect(0,0,128,128);
+  // Ceiling tile grid
+  ctx.strokeStyle = 'rgba(180,180,180,0.4)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 128; i += 32) {
+    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,128); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(128,i); ctx.stroke();
+  }
+  // Tiny holes/dots
+  for (let i = 0; i < 200; i++) {
+    const x = Math.random()*128, y = Math.random()*128;
+    ctx.fillStyle = `rgba(100,100,100,${0.05+Math.random()*0.1})`;
+    ctx.fillRect(x,y,1,1);
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+// ─── SCENE SETUP ─────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+scene.fog = new THREE.Fog(0x8a7a5a, VIEW_RANGE*0.3, VIEW_RANGE*0.7);
+
+// Strong ambient light so player can see even without fixtures
+const ambient = new THREE.AmbientLight(0x9a8a6a, 0.85);
+scene.add(ambient);
+// Directional fill from above
+const hemi = new THREE.HemisphereLight(0xb09a7a, 0x4a3a28, 0.6);
+scene.add(hemi);
+
+// Flashlight (follows camera, dimmed at start until we have battery)
+const flashlight = new THREE.PointLight(0xfff0d0, 0.6, 12);
+flashlight.position.set(0, 0, 0);
+scene.add(flashlight);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth/window.innerHeight, 0.1, VIEW_RANGE*2);
+camera.position.set(0, PLAYER_H, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = false;
+// Inject canvas before intro so it renders behind intro overlay
+document.body.insertBefore(renderer.domElement, document.body.firstChild);
+renderer.domElement.style.position = 'fixed';
+renderer.domElement.style.top = '0';
+renderer.domElement.style.left = '0';
+renderer.domElement.style.zIndex = '1';
+
+const controls = new THREE.PointerLockControls(camera, renderer.domElement);
+controls.pointerSpeed = 0.7;
+
+// ─── MATERIALS ───────────────────────────────────────────
+const wallTex = genWallTex();
+wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+wallTex.repeat.set(1, 1.5);
+
+const floorTex = genFloorTex();
+floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+floorTex.repeat.set(2, 2);
+
+const ceilTex = genCeilTex();
+ceilTex.wrapS = ceilTex.wrapT = THREE.RepeatWrapping;
+ceilTex.repeat.set(2, 2);
+
+const matWall = new THREE.MeshStandardMaterial({map:wallTex, roughness:0.9, metalness:0});
+const matFloor = new THREE.MeshStandardMaterial({map:floorTex, roughness:0.95, metalness:0});
+const matCeil = new THREE.MeshStandardMaterial({map:ceilTex, roughness:0.8, metalness:0, side:THREE.DoubleSide});
+const matBase = new THREE.MeshStandardMaterial({color:0x3a3028, roughness:0.95});
+const matLightPanel = new THREE.MeshStandardMaterial({
+  color:0xfff8e8, emissive:0xfff0c0, emissiveIntensity:0.8,
+  transparent:true, opacity:0.6
+});
+const matPillar = new THREE.MeshStandardMaterial({color:0x8a7a5a, roughness:0.85});
+
+// Shared geo
+const geoWall = new THREE.BoxGeometry(TILE, WALL_H, 0.2);
+const geoFloor = new THREE.PlaneGeometry(TILE, TILE);
+const geoCeil = new THREE.PlaneGeometry(TILE, TILE);
+
+// ─── BUILD MAP ───────────────────────────────────────────
+function buildMap(mapData, rooms) {
+  const {map} = mapData;
+  const group = new THREE.Group();
+  const h = map.length, w = map[0].length;
+  const lightFixtures = [];
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (map[y][x] === T.WALL) continue;
+      const px = (x - w/2) * TILE, pz = (y - h/2) * TILE;
+      const isRoom = map[y][x] === T.FLOOR;
+
+      // Floor
+      const floor = new THREE.Mesh(geoFloor, matFloor);
+      floor.rotation.x = -Math.PI/2;
+      floor.position.set(px, 0.02, pz);
+      floor.receiveShadow = true;
+      group.add(floor);
+
+      // Ceiling
+      const ceil = new THREE.Mesh(geoCeil, matCeil);
+      ceil.rotation.x = Math.PI/2;
+      ceil.position.set(px, WALL_H, pz);
+      group.add(ceil);
+
+      // Walls (check 4 neighbors)
+      const neighbors = [
+        {dx:0, dy:-1, rot:0},          // north
+        {dx:1, dy:0, rot:Math.PI/2},   // east
+        {dx:0, dy:1, rot:Math.PI},     // south
+        {dx:-1, dy:0, rot:-Math.PI/2}, // west
+      ];
+      for (const n of neighbors) {
+        const nx = x + n.dx, ny = y + n.dy;
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h || map[ny][nx] === T.WALL) {
+          const wall = new THREE.Mesh(geoWall, matWall);
+          wall.position.set(px + n.dx * TILE/2, WALL_H/2, pz + n.dy * TILE/2);
+          wall.rotation.y = n.rot;
+          wall.castShadow = true; wall.receiveShadow = true;
+          group.add(wall);
+
+          // Baseboard
+          const base = new THREE.Mesh(
+            new THREE.BoxGeometry(TILE, 0.15, 0.25),
+            matBase
+          );
+          base.position.set(px + n.dx * TILE/2, 0.08, pz + n.dy * TILE/2);
+          base.rotation.y = n.rot;
+          group.add(base);
+        }
+      }
+
+      // Light fixture (in rooms, some corridors)
+      if ((isRoom || Math.random() < 0.4) && Math.random() < 0.6) {
+        const light = new THREE.Mesh(
+          new THREE.BoxGeometry(TILE * 0.5, 0.08, TILE * 0.3),
+          matLightPanel
+        );
+        light.position.set(px, WALL_H - 0.04, pz);
+        group.add(light);
+
+        const lightObj = new THREE.PointLight(0xffe8b0, 0.6, TILE * 3);
+        lightObj.position.set(px, WALL_H - 0.5, pz);
+        lightObj.castShadow = true;
+        lightObj.shadow.mapSize.width = 256;
+        lightObj.shadow.mapSize.height = 256;
+        group.add(lightObj);
+        lightFixtures.push({
+          light: lightObj,
+          baseIntensity: 0.5 + Math.random() * 0.4,
+          flickerSpeed: 3 + Math.random() * 5,
+          flickerAmt: 0.1 + Math.random() * 0.25,
+          phase: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+  }
+
+  // Pillars in larger rooms
+  for (const room of rooms) {
+    if (room.w >= 5 && room.h >= 4) {
+      const pillarCount = Math.floor((room.w * room.h) / 20);
+      for (let i = 0; i < pillarCount; i++) {
+        const px = (room.x + 1 + Math.random() * (room.w - 2) - w/2) * TILE;
+        const pz = (room.y + 1 + Math.random() * (room.h - 2) - h/2) * TILE;
+        const pillar = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.25, 0.3, WALL_H, 8),
+          matPillar
+        );
+        pillar.position.set(px, WALL_H/2, pz);
+        pillar.castShadow = true;
+        group.add(pillar);
+
+        const baseRing = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.35, 0.4, 0.2, 8),
+          matBase
+        );
+        baseRing.position.set(px, 0.1, pz);
+        group.add(baseRing);
+      }
+    }
+  }
+
+  return {group, lightFixtures};
+}
+
+// ─── ENTITY SYSTEM ───────────────────────────────────────
+function createEntity(position, waypoints) {
+  const group = new THREE.Group();
+
+  // Body
+  const bodyMat = new THREE.MeshStandardMaterial({color:0x2a2a2a, roughness:0.8, metalness:0});
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.4, 6), bodyMat);
+  body.position.y = 0.7;
+  body.castShadow = true;
+  group.add(body);
+
+  // Head
+  const headMat = new THREE.MeshStandardMaterial({color:0x3a3a3a, roughness:0.7});
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 6, 6), headMat);
+  head.position.y = 1.5;
+  group.add(head);
+
+  // Arms
+  const armMat = new THREE.MeshStandardMaterial({color:0x2a2a2a, roughness:0.8});
+  for (const side of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.8, 4), armMat);
+    arm.position.set(side * 0.5, 1.0, 0);
+    arm.rotation.z = side * 0.3;
+    group.add(arm);
+  }
+
+  group.position.copy(position);
+  group.scale.set(1, 1 + Math.random() * 0.1, 1);
+
+  return {
+    mesh: group,
+    waypoints: waypoints || [],
+    currentWp: 0,
+    speed: 1.2 + Math.random() * 0.5,
+    state: 'patrol', // patrol, chase, attack
+    detectionRange: 8 + Math.random() * 4,
+    attackRange: 1.5,
+    attackCooldown: 0,
+    patrolPause: 0,
+    bodyMat,
+    headMat,
+  };
+}
+
+function updateEntity(entity, playerPos, delta) {
+  if (state.dead) return;
+
+  const pos = entity.mesh.position;
+  const dir = new THREE.Vector3().subVectors(playerPos, pos);
+  const dist = dir.length();
+  dir.y = 0;
+  if (dir.length() > 0.01) dir.normalize();
+
+  // State transitions
+  if (dist < entity.detectionRange && dist > entity.attackRange) {
+    // Can we see the player? Raycast check
+    entity.state = 'chase';
+  } else if (dist <= entity.attackRange) {
+    entity.state = 'attack';
+  } else if (entity.state === 'chase' && dist > entity.detectionRange * 1.5) {
+    entity.state = 'patrol';
+    entity.currentWp = 0;
+  }
+
+  switch (entity.state) {
+    case 'patrol': {
+      if (entity.waypoints.length === 0) {
+        // Wander randomly
+        const wanderTarget = new THREE.Vector3(
+          pos.x + (Math.random() - 0.5) * 4,
+          0,
+          pos.z + (Math.random() - 0.5) * 4
+        );
+        entity.waypoints = [wanderTarget];
+        entity.currentWp = 0;
+      }
+
+      const target = entity.waypoints[entity.currentWp];
+      if (!target) break;
+
+      const toTarget = new THREE.Vector3().subVectors(target, pos);
+      toTarget.y = 0;
+      const tDist = toTarget.length();
+
+      if (tDist < 0.5) {
+        entity.currentWp = (entity.currentWp + 1) % entity.waypoints.length;
+        entity.patrolPause = 1 + Math.random() * 2;
+        break;
+      }
+
+      if (entity.patrolPause > 0) {
+        entity.patrolPause -= delta;
+        break;
+      }
+
+      toTarget.normalize();
+      pos.x += toTarget.x * entity.speed * 0.3 * delta;
+      pos.z += toTarget.z * entity.speed * 0.3 * delta;
+      entity.mesh.lookAt(pos.x + toTarget.x, pos.y, pos.z + toTarget.z);
+      break;
+    }
+
+    case 'chase': {
+      const chaseSpeed = entity.speed * 0.8;
+      pos.x += dir.x * chaseSpeed * delta;
+      pos.z += dir.z * chaseSpeed * delta;
+      entity.mesh.lookAt(playerPos.x, pos.y, playerPos.z);
+
+      // Alert player
+      state.entityNearby = true;
+      state.entityAlertTimer = 0.5;
+      playAlertSound();
+      break;
+    }
+
+    case 'attack': {
+      entity.mesh.lookAt(playerPos.x, pos.y, playerPos.z);
+      if (entity.attackCooldown <= 0) {
+        state.health -= 15;
+        entity.attackCooldown = 1.5;
+        // Vignette flash
+        vigEl.style.opacity = '1';
+        setTimeout(() => vigEl.style.opacity = '0', 200);
+
+        if (state.health <= 0) {
+          state.health = 0;
+          die();
+        }
+      }
+      entity.attackCooldown -= delta;
+      break;
+    }
+  }
+
+  // Subtle idle sway
+  const time = performance.now() / 1000;
+  entity.mesh.position.y = Math.sin(time * 0.8 + entity.mesh.id) * 0.02;
+}
+
+function die() {
+  state.dead = true;
+  controls.unlock();
+  deathEl.classList.add('visible');
+}
+
+// ─── SOUND SYSTEM ────────────────────────────────────────
+let audioCtx = null;
+let humOsc = null;
+let humGain = null;
+let noiseNode = null;
+let noiseGain = null;
+
+function initAudio() {
+  if (state.soundInitialized) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // 60Hz hum
+    humOsc = audioCtx.createOscillator();
+    humGain = audioCtx.createGain();
+    humOsc.type = 'sine';
+    humOsc.frequency.setValueAtTime(60, audioCtx.currentTime);
+    humGain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+    humOsc.connect(humGain);
+    humGain.connect(audioCtx.destination);
+    humOsc.start();
+
+    // 120Hz harmonic
+    const hum2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    hum2.type = 'sine';
+    hum2.frequency.setValueAtTime(120, audioCtx.currentTime);
+    gain2.gain.setValueAtTime(0.03, audioCtx.currentTime);
+    hum2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    hum2.start();
+
+    // Noise (fluorescent buzz)
+    const bufSize = audioCtx.sampleRate * 0.1;
+    const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * 0.3;
+    noiseNode = audioCtx.createBufferSource();
+    noiseNode.buffer = buf;
+    noiseNode.loop = true;
+    noiseGain = audioCtx.createGain();
+    noiseGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+    noiseNode.connect(noiseGain);
+    noiseGain.connect(audioCtx.destination);
+    noiseNode.start();
+
+    state.soundInitialized = true;
+  } catch(e) {
+    console.warn('Audio init failed:', e);
+  }
+}
+
+function playAlertSound() {
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.3);
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.3);
+  } catch(e) {}
+}
+
+function playFootstep() {
+  if (!audioCtx) return;
+  try {
+    const noise = audioCtx.createBufferSource();
+    const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.05, audioCtx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.5;
+    noise.buffer = buf;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(300, audioCtx.currentTime);
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    noise.start();
+  } catch(e) {}
+}
+
+// ─── LEVEL GENERATION ────────────────────────────────────
+let mapGroup = null;
+let currentLights = [];
+let entities = [];
+let playerSpawn = new THREE.Vector3(0, PLAYER_H, 0);
+
+function generateLevel(levelNum) {
+  // Clear old
+  if (mapGroup) {
+    scene.remove(mapGroup);
+    // Dispose
+    mapGroup.traverse(child => {
+      if (child.isMesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+        else child.material.dispose();
+      }
+    });
+  }
+  entities.forEach(e => scene.remove(e.mesh));
+  entities = [];
+
+  const numRooms = 8 + levelNum * 2;
+  const mapData = generateMap(GRID_W, GRID_H, numRooms);
+  // Sync collision data to the rendered map
+  currentMapData = mapData;
+  const {group, lightFixtures} = buildMap(mapData, mapData.rooms);
+  mapGroup = group;
+  scene.add(group);
+  currentLights = lightFixtures;
+
+  // Find spawn position (center of first room)
+  if (mapData.rooms.length > 0) {
+    const r = mapData.rooms[0];
+    const cx = (r.cx - GRID_W/2) * TILE;
+    const cz = (r.cy - GRID_H/2) * TILE;
+    playerSpawn.set(cx + 0.5, PLAYER_H, cz + 0.5);
+  }
+
+  // Spawn entities in distant rooms
+  const w2 = GRID_W/2, h2 = GRID_H/2;
+  for (let i = 1; i < mapData.rooms.length; i += 2) {
+    if (Math.random() > 0.6) continue;
+    const r = mapData.rooms[i];
+    const ex = (r.cx + Math.random() * 2 - 1 - w2) * TILE;
+    const ez = (r.cy + Math.random() * 2 - 1 - h2) * TILE;
+
+    // Generate waypoints (room corners)
+    const wps = [];
+    for (let w = 0; w < 3; w++) {
+      wps.push(new THREE.Vector3(
+        (r.x + 0.5 + Math.random() * (r.w - 1) - w2) * TILE,
+        0,
+        (r.y + 0.5 + Math.random() * (r.h - 1) - h2) * TILE
+      ));
+    }
+    const e = createEntity(new THREE.Vector3(ex, 0, ez), wps);
+    entities.push(e);
+    scene.add(e.mesh);
+  }
+
+  // Place exit in room furthest from spawn
+  exitPosition = null;
+  let bestDist = -1;
+  let exitRoom = null;
+  for (const r of mapData.rooms) {
+    const dx = r.cx - mapData.rooms[0].cx;
+    const dy = r.cy - mapData.rooms[0].cy;
+    const dist = dx*dx + dy*dy;
+    if (dist > bestDist) { bestDist = dist; exitRoom = r; }
+  }
+  if (exitRoom) {
+    const ex = (exitRoom.cx - w2) * TILE;
+    const ez = (exitRoom.cy - h2) * TILE;
+    exitPosition = new THREE.Vector3(ex, 0, ez);
+    // Exit mesh — dark doorway with glow
+    const exitMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0500, emissive: 0x3a1a00, emissiveIntensity: 0.5,
+      transparent: true, opacity: 0.85
+    });
+    const arch = new THREE.Mesh(new THREE.BoxGeometry(1.6, 3.0, 0.4), exitMat);
+    arch.position.set(ex, 1.5, ez);
+    group.add(arch);
+    // Glow light
+    const glow = new THREE.PointLight(0x8a4a1a, 0.6, 6);
+    glow.position.set(ex, 2.0, ez - 0.5);
+    group.add(glow);
+    // Subtle glow plane behind
+    const glowPlaneMat = new THREE.MeshStandardMaterial({
+      color: 0x4a1a00, emissive: 0x2a0a00, emissiveIntensity: 0.3,
+      transparent: true, opacity: 0.3, side: THREE.DoubleSide
+    });
+    const glowPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 3.5), glowPlaneMat);
+    glowPlane.position.set(ex, 1.5, ez - 0.3);
+    group.add(glowPlane);
+  }
+
+  // Update UI
+  levelInd.textContent = state.levelNames[Math.min(levelNum, state.levelNames.length - 1)];
+}
+
+// ─── COLLISION ───────────────────────────────────────────
+function checkCollision(pos, mapData) {
+  // Simple grid-based collision
+  const {map} = mapData;
+  if (!map) return true;
+  const h = map.length, w = map[0].length;
+  const mx = (pos.x / TILE) + w/2;
+  const mz = (pos.z / TILE) + h/2;
+  const radius = 0.3;
+
+  // Check 4 corners
+  for (const ox of [-radius, radius]) {
+    for (const oz of [-radius, radius]) {
+      const tx = Math.floor(mx + ox);
+      const tz = Math.floor(mz + oz);
+      if (tx < 0 || tx >= w || tz < 0 || tz >= h) return true;
+      if (map[tz][tx] === T.WALL) return true;
+    }
+  }
+  return false;
+}
+
+// ─── GAME LOOP ───────────────────────────────────────────
+let currentMapData = null;
+let lastTime = 0;
+let bobPhase = 0;
+let exitPosition = null;
+let levelTransitionTimer = 0;
+
+let lastFrameTime = performance.now();
+let frameCount = 0;
+let currentFps = 0;
+
+function gameLoop(time) {
+  requestAnimationFrame(gameLoop);
+  const delta = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+
+  if (!state.running || state.dead) {
+    renderer.render(scene, camera);
+    return;
+  }
+
+  // FPS counter
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFrameTime > 1000) {
+    currentFps = frameCount;
+    frameCount = 0;
+    lastFrameTime = now;
+    const dbg = document.getElementById('debug');
+    if (dbg) dbg.textContent = `${currentFps} fps  pos ${camera.position.x.toFixed(1)},${camera.position.z.toFixed(1)}  entities ${entities.length}  rooms ${currentMapData ? currentMapData.rooms.length : '?'}`;
+  }
+
+  // Movement
+  const speed = 3.5;
+  const sprintMult = 1.6;
+  const keys = controls.isLocked ? getKeys() : {};
+  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  forward.y = 0; forward.normalize();
+  const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+  right.y = 0; right.normalize();
+
+  const moveDir = new THREE.Vector3();
+  if (keys['KeyW']) moveDir.add(forward);
+  if (keys['KeyS']) moveDir.sub(forward);
+  if (keys['KeyA']) moveDir.sub(right);
+  if (keys['KeyD']) moveDir.add(right);
+
+  const isSprint = keys['ShiftLeft'] || keys['ShiftRight'];
+  const moveSpeed = speed * (isSprint ? sprintMult : 1) * delta;
+
+  if (moveDir.length() > 0) {
+    moveDir.normalize();
+    const newPos = camera.position.clone();
+    newPos.x += moveDir.x * moveSpeed;
+    newPos.z += moveDir.z * moveSpeed;
+
+    // Check collision (X and Z separately for wall sliding)
+    const testX = camera.position.clone();
+    testX.x = newPos.x;
+    if (!checkCollision(testX, currentMapData)) {
+      camera.position.x = newPos.x;
+    }
+    const testZ = camera.position.clone();
+    testZ.z = newPos.z;
+    if (!checkCollision(testZ, currentMapData)) {
+      camera.position.z = newPos.z;
+    }
+
+    // Footsteps
+    state.footstepTimer -= delta;
+    if (state.footstepTimer <= 0) {
+      playFootstep();
+      state.footstepTimer = isSprint ? 0.25 : 0.45;
+    }
+
+    // Head bob
+    bobPhase += delta * (isSprint ? 12 : 8);
+    camera.position.y = PLAYER_H + Math.sin(bobPhase) * 0.02;
+
+    // Drain flashlight
+    if (isSprint) state.flashlight = Math.max(0, state.flashlight - 2 * delta);
+  } else {
+    camera.position.y = PLAYER_H;
+    bobPhase = 0;
+  }
+
+  // Recharge flashlight slowly
+  if (!isSprint) state.flashlight = Math.min(100, state.flashlight + 1 * delta);
+
+  // Update flashlight position
+  flashlight.position.copy(camera.position);
+  flashlight.position.y -= 0.15;
+  const batt = state.flashlight / 100;
+  flashlight.intensity = 0.05 + batt * 0.65;
+
+  // Update entities
+  for (const e of entities) {
+    updateEntity(e, camera.position, delta);
+  }
+
+  // Light flicker
+  state.flickerTime += delta;
+  for (const fl of currentLights) {
+    const flicker = Math.sin(state.flickerTime * fl.flickerSpeed + fl.phase);
+    const intensity = fl.baseIntensity * (1 + flicker * fl.flickerAmt);
+    fl.light.intensity = Math.max(0.1, intensity);
+  }
+
+  // Sanity drain when entity is near
+  if (state.entityNearby) {
+    state.sanity = Math.max(0, state.sanity - 3 * delta);
+    state.entityAlertTimer -= delta;
+    if (state.entityAlertTimer <= 0) {
+      state.entityNearby = false;
+    }
+
+    // Alert flash
+    const alertAlpha = Math.sin(time * 0.01) * 0.3 + 0.3;
+    alertEl.style.opacity = String(alertAlpha);
+    alertEl.textContent = '⚠ 注意 ⚠';
+  } else {
+    alertEl.style.opacity = '0';
+    // Recover sanity slowly
+    state.sanity = Math.min(100, state.sanity + 0.5 * delta);
+  }
+
+  // Update sanity bar
+  sanityFill.style.width = state.sanity + '%';
+  if (state.sanity < 30) {
+    sanityFill.style.background = 'linear-gradient(90deg,#c8a951,#8a2a2a)';
+  } else {
+    sanityFill.style.background = 'linear-gradient(90deg,#c8a951,#4a6fa5)';
+  }
+
+  // Level atmosphere
+  const fogColors = [0x8a7a5a, 0x5a5a4a, 0x3a2a1a];
+  scene.fog.color.setHex(fogColors[Math.min(state.level, fogColors.length-1)]);
+
+  // Level transition check
+  if (exitPosition && levelTransitionTimer <= 0) {
+    const dx = camera.position.x - exitPosition.x;
+    const dz = camera.position.z - exitPosition.z;
+    if (dx*dx + dz*dz < 4) {
+      state.level = (state.level + 1) % 3;
+      vigEl.style.background = 'radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.9))';
+      vigEl.style.opacity = '1';
+      levelTransitionTimer = 1.5;
+      levelInd.textContent = '>  ＞  ›  进入下一层';
+      setTimeout(() => {
+        generateLevel(state.level);
+        camera.position.copy(playerSpawn);
+        exitPosition = null;
+        vigEl.style.opacity = '0';
+        vigEl.style.background = 'radial-gradient(ellipse at center, transparent 60%, rgba(139,0,0,0.4))';
+      }, 600);
+    }
+  }
+  levelTransitionTimer = Math.max(0, levelTransitionTimer - delta);
+
+  // Sanity visual effects
+  if (state.sanity < 35) {
+    const severity = (35 - state.sanity) / 35;
+    vigEl.style.background = `radial-gradient(ellipse at center, transparent ${60 - severity*30}%, rgba(0, 20, 0, ${severity * 0.5}))`;
+    // Screen shake
+    if (state.sanity < 20) {
+      camera.position.x += (Math.random() - 0.5) * severity * 0.03;
+      camera.position.z += (Math.random() - 0.5) * severity * 0.03;
+    }
+  }
+
+  // Render
+  renderer.render(scene, camera);
+}
+
+// ─── KEYBOARD ────────────────────────────────────────────
+const keysDown = {};
+function getKeys() { return keysDown; }
+document.addEventListener('keydown', e => { keysDown[e.code] = true; });
+document.addEventListener('keyup', e => { keysDown[e.code] = false; });
+
+// ─── WINDOW ──────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ─── START GAME ──────────────────────────────────────────
+function startGame() {
+  initAudio();
+  state.running = true;
+  introEl.classList.add('hidden');
+  hud.classList.add('visible');
+  try { controls.lock(); } catch(e) {}
+
+  // Generate first level
+  generateLevel(0);
+  camera.position.copy(playerSpawn);
+  // Force initial render so first frame is visible even before lock completes
+  renderer.render(scene, camera);
+}
+
+introEl.addEventListener('click', () => {
+  if (!controls.isLocked) {
+    startGame();
+  }
+});
+
+// Handle pointer lock
+document.addEventListener('pointerlockchange', () => {
+  if (!document.pointerLockElement && state.running && !state.dead) {
+    // Re-lock on click
+    const clickHandler = () => {
+      controls.lock();
+      document.removeEventListener('click', clickHandler);
+    };
+    document.addEventListener('click', clickHandler);
+  }
+});
+
+// Hide loading
+loadingEl.classList.add('hidden');
+
+// Kick off game loop
+requestAnimationFrame((time) => {
+  lastTime = time;
+  gameLoop(time);
+});
+
+console.log('Backrooms loaded. Click to enter.');
+
+// Signal ready for the click handler
+window.__gameReady = true;
+window.__startGame = startGame;
+} catch(e) {
+  window.__gameError('初始化失败: ' + (e.message || e));
+}
+})();
+</script>
+</body>
+</html>
