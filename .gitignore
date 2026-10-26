@@ -15,3 +15,7 @@ __pycache__/
 # Backup
 *.bak
 *.swp
+
+# 运行态与密钥（审计补）
+.env
+node_modules/
